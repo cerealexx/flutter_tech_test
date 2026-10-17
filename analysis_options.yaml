@@ -6,6 +6,9 @@ linter:
 analyzer:
   exclude:
     - '**.g.dart'
+    - build/**
+    - android/**
+    - ios/**
     
 formatter:
   trailing_commas: preserve
