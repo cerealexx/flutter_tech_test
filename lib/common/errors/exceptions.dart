@@ -30,3 +30,7 @@ class FeedParseException extends CabinaException {
 class CabinaPlayerException extends CabinaException {
   const CabinaPlayerException(super.message, {super.cause});
 }
+
+class LibraryStorageException extends CabinaException {
+  const LibraryStorageException(super.message, {super.cause});
+}

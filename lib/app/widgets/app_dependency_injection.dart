@@ -3,6 +3,10 @@ import 'package:cabina/common/services/itunes_search_service.dart';
 import 'package:cabina/discover/cubit/discover_cubit.dart';
 import 'package:cabina/discover/data/discover_repository.dart';
 import 'package:cabina/discover/data/favourites_repository.dart';
+import 'package:cabina/library/cubit/library_cubit.dart';
+import 'package:cabina/library/data/library_repository.dart';
+import 'package:cabina/library/data/services/i_library_service.dart';
+import 'package:cabina/library/data/services/shared_preferences_library_service.dart';
 import 'package:cabina/search/data/search_repository.dart';
 import 'package:cabina/show_detail/data/services/rss_feed_service.dart';
 import 'package:cabina/show_detail/data/show_detail_repository.dart';
@@ -51,9 +55,21 @@ class AppDependencyInjection extends StatelessWidget {
         RepositoryProvider(
           create: (_) => FavouritesRepository(prefs: prefs),
         ),
+        RepositoryProvider<ILibraryService>(
+          create: (_) => SharedPreferencesLibraryService(prefs: prefs),
+        ),
+        RepositoryProvider(
+          create: (ctx) =>
+              LibraryRepository(service: ctx.read<ILibraryService>()),
+        ),
       ],
       child: MultiBlocProvider(
         providers: [
+          BlocProvider(
+            create: (ctx) => LibraryCubit(
+              repository: ctx.read<LibraryRepository>(),
+            ),
+          ),
           BlocProvider(
             create: (ctx) => DiscoverCubit(
               discoverRepository: ctx.read<DiscoverRepository>(),

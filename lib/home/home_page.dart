@@ -1,36 +1,42 @@
 import 'package:cabina/discover/views/discover_page.dart';
-import 'package:cabina/library/library_page.dart';
+import 'package:cabina/library/views/library_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+enum HomeTab { discover, library }
+
+class HomePage extends StatelessWidget {
+  const HomePage({this.tab = HomeTab.discover, super.key});
+
+  final HomeTab tab;
 
   static const routeName = 'home';
   static const routePath = '/';
 
   static GoRoute route() => GoRoute(
-        path: routePath,
-        name: routeName,
-        builder: (context, state) => const HomePage(),
-      );
-
-  @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  int _index = 0;
+    path: routePath,
+    name: routeName,
+    builder: (context, state) => HomePage(
+      tab: switch (state.uri.queryParameters['tab']) {
+        'discover' => HomeTab.discover,
+        'library' => HomeTab.library,
+        _ => HomeTab.discover,
+      },
+    ),
+  );
 
   static const List<Widget> _tabs = [DiscoverPage(), LibraryPage()];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _tabs),
+      body: IndexedStack(index: tab.index, children: _tabs),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        selectedIndex: tab.index,
+        onDestinationSelected: (index) => context.goNamed(
+          routeName,
+          queryParameters: {'tab': HomeTab.values[index].name},
+        ),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.explore_outlined),
