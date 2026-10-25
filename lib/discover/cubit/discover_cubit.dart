@@ -45,7 +45,7 @@ class DiscoverCubit extends Cubit<DiscoverState> {
   }
 
   void toggleFavourite(int podcastId) {
-    final favourites = state.favouriteIds;
+    final favourites = [...state.favouriteIds];
     if (favourites.contains(podcastId)) {
       favourites.remove(podcastId);
     } else {
