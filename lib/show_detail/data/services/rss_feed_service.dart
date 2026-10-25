@@ -24,21 +24,12 @@ class RssFeedService {
       throw FeedParseException('Feed is not valid XML', cause: e);
     }
 
-    final channel = document.findAllElements('channel').first;
+    final channel = document.findAllElements('channel').firstOrNull;
+    if (channel == null) {
+      throw const FeedParseException('Feed is missing a channel');
+    }
 
-    final episodes = channel.findAllElements('item').map((item) {
-      final enclosure = item.findElements('enclosure').first;
-      return Episode(
-        guid: _firstText(item, 'guid') ??
-            item.findElements('title').first.innerText,
-        title: item.findElements('title').first.innerText.trim(),
-        audioUrl: enclosure.getAttribute('url')!,
-        descriptionHtml: _firstText(item, 'description') ?? '',
-        duration: _parseDuration(_firstText(item, 'itunes:duration')),
-        publishedAt: _parseDate(_firstText(item, 'pubDate')),
-        imageUrl: _firstAttr(item, 'itunes:image', 'href'),
-      );
-    }).toList()
+    final episodes = channel.findAllElements('item').map(_parseEpisode).toList()
       // Newest first.
       ..sort((a, b) {
         final aDate = a.publishedAt ?? DateTime(1970);
@@ -58,6 +49,28 @@ class RssFeedService {
     );
   }
 
+  Episode _parseEpisode(XmlElement item) {
+    final title = _firstText(item, 'title');
+    if (title == null) {
+      throw const FeedParseException('An episode is missing its title');
+    }
+
+    final audioUrl = _firstAttr(item, 'enclosure', 'url')?.trim();
+    if (audioUrl == null || audioUrl.isEmpty) {
+      throw const FeedParseException('An episode is missing its audio URL');
+    }
+
+    return Episode(
+      guid: _firstText(item, 'guid') ?? title,
+      title: title,
+      audioUrl: audioUrl,
+      descriptionHtml: _firstText(item, 'description') ?? '',
+      duration: _parseDuration(_firstText(item, 'itunes:duration')),
+      publishedAt: _parseDate(_firstText(item, 'pubDate')),
+      imageUrl: _firstAttr(item, 'itunes:image', 'href'),
+    );
+  }
+
   String? _firstText(XmlElement parent, String name) {
     final matches = parent.findElements(name);
     if (matches.isEmpty) return null;
@@ -71,13 +84,20 @@ class RssFeedService {
     return matches.first.getAttribute(attr);
   }
 
-  Duration _parseDuration(String? raw) {
-    if (raw == null) return Duration.zero;
+  Duration? _parseDuration(String? raw) {
+    if (raw == null) return null;
     final parts = raw.split(':');
-    final hours = int.parse(parts[0]);
-    final minutes = int.parse(parts[1]);
-    final seconds = int.parse(parts[2]);
-    return Duration(hours: hours, minutes: minutes, seconds: seconds);
+    if (parts.length > 3) return null;
+
+    // RSS durations can be seconds, MM:SS, or HH:MM:SS. Invalid optional
+    // metadata should not prevent the episode from being played.
+    var seconds = 0;
+    for (final part in parts) {
+      final value = int.tryParse(part, radix: 10);
+      if (value == null || value < 0) return null;
+      seconds = seconds * 60 + value;
+    }
+    return Duration(seconds: seconds);
   }
 
   DateTime? _parseDate(String? raw) {
