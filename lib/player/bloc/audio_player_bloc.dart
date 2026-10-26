@@ -101,6 +101,10 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
     if (state.status.isPlaying) {
       await _repository.pause();
     } else {
+      if (state.status == PlayerStatus.completed) {
+        await _repository.seekTo(Duration.zero);
+        if (_isClosing) return;
+      }
       await _repository.play();
     }
   }
@@ -172,7 +176,10 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
     emit(
       state.copyWith(
         position: PlayerPosition(
-          position: event.position.position,
+          // A final position event can arrive after the completed status.
+          position: state.status == PlayerStatus.completed
+              ? Duration.zero
+              : event.position.position,
           buffered: event.position.buffered,
           total: total,
         ),
@@ -185,7 +192,17 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
     Emitter<AudioPlayerState> emit,
   ) {
     if (_isClosing) return;
-    emit(state.copyWith(status: event.status));
+    emit(
+      state.copyWith(
+        status: event.status,
+        position: event.status == PlayerStatus.completed
+            ? PlayerPosition(
+                buffered: state.position.buffered,
+                total: state.position.total,
+              )
+            : null,
+      ),
+    );
   }
 
   @override

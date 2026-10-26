@@ -46,6 +46,108 @@ void main() {
     await statuses.close();
   });
 
+  group('completed playback', () {
+    late AudioPlayerBloc bloc;
+    const total = Duration(minutes: 20);
+
+    setUp(() {
+      bloc = AudioPlayerBloc(
+        repository: AudioPlayerRepository(service: service),
+      );
+    });
+
+    tearDown(() async {
+      if (!bloc.isClosed) await bloc.close();
+    });
+
+    test('resets progress and ignores late end-position updates', () async {
+      positions.add(
+        const PlayerPosition(position: total, buffered: total, total: total),
+      );
+      statuses.add(PlayerStatus.playing);
+      await pumpEventQueue();
+      expect(bloc.state.position.progress, 1);
+
+      statuses.add(PlayerStatus.completed);
+      await pumpEventQueue();
+      expect(bloc.state.status, PlayerStatus.completed);
+      expect(
+        bloc.state.position,
+        const PlayerPosition(buffered: total, total: total),
+      );
+
+      // Position and status arrive on separate streams, in either order.
+      positions.add(const PlayerPosition(position: total, buffered: total));
+      await pumpEventQueue();
+      expect(bloc.state.position.position, Duration.zero);
+      expect(bloc.state.position.total, total);
+      verifyNever(service.play);
+    });
+
+    test('play after each completion rewinds before starting again', () async {
+      for (var replay = 0; replay < 2; replay++) {
+        statuses.add(PlayerStatus.completed);
+        await pumpEventQueue();
+        final seeking = Completer<void>();
+        when(() => service.seekTo(Duration.zero)).thenAnswer(
+          (_) => seeking.future,
+        );
+        when(service.play).thenAnswer((_) async {
+          statuses.add(PlayerStatus.playing);
+        });
+
+        bloc.add(const PlayerPlayPauseToggled());
+        await pumpEventQueue();
+        verify(() => service.seekTo(Duration.zero)).called(1);
+        verifyNever(service.play);
+
+        seeking.complete();
+        await pumpEventQueue();
+        verify(service.play).called(1);
+        expect(bloc.state.status, PlayerStatus.playing);
+        positions.add(
+          const PlayerPosition(position: Duration(seconds: 1), total: total),
+        );
+        await pumpEventQueue();
+        expect(bloc.state.position.position, const Duration(seconds: 1));
+      }
+    });
+
+    test('resuming a paused episode keeps its current position', () async {
+      positions.add(
+        const PlayerPosition(position: Duration(minutes: 3), total: total),
+      );
+      statuses.add(PlayerStatus.paused);
+      await pumpEventQueue();
+
+      bloc.add(const PlayerPlayPauseToggled());
+      await pumpEventQueue();
+
+      verify(service.play).called(1);
+      verifyNever(() => service.seekTo(Duration.zero));
+      expect(bloc.state.position.position, const Duration(minutes: 3));
+    });
+
+    test('leaving during rewind cannot restart playback', () async {
+      final seeking = Completer<void>();
+      final started = Completer<void>();
+      when(() => service.seekTo(Duration.zero)).thenAnswer((_) {
+        started.complete();
+        return seeking.future;
+      });
+      statuses.add(PlayerStatus.completed);
+      await pumpEventQueue();
+      bloc.add(const PlayerPlayPauseToggled());
+      await started.future;
+
+      await bloc.close();
+      seeking.complete();
+      await pumpEventQueue();
+
+      verifyNever(service.play);
+    });
+  });
+
   group('lifecycle', () {
     late AudioPlayerBloc bloc;
 
