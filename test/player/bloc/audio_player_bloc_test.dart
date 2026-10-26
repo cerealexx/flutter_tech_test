@@ -227,7 +227,7 @@ void main() {
 
         await bloc.close();
         final lastState = bloc.state;
-        command.completeError(StateError('Player disposed'));
+        command.completeError(const CabinaPlayerException('Player disposed'));
         await pumpEventQueue();
 
         expect(bloc.state, lastState);
@@ -271,6 +271,86 @@ void main() {
         verify(service.dispose).called(1);
       },
     );
+  });
+
+  for (final status in [
+    PlayerStatus.paused,
+    PlayerStatus.playing,
+    PlayerStatus.completed,
+  ]) {
+    test(
+      'topic from $status switches to analyzed audio, seeks, then plays',
+      () async {
+        final local = Uri.file('/tmp/analyzed.mp3');
+        when(service.pause).thenAnswer((_) async {});
+        when(
+          () => service.open(local.toString()),
+        ).thenAnswer((_) async => const Duration(minutes: 10));
+        when(() => service.setSpeed(1.5)).thenAnswer((_) async {});
+        when(
+          () => service.seekTo(const Duration(seconds: 65)),
+        ).thenAnswer((_) async {});
+        final bloc = AudioPlayerBloc(
+          repository: AudioPlayerRepository(service: service),
+        )..add(const PlayerSpeedChanged(PlaybackSpeed.x1_5));
+        await pumpEventQueue();
+        verify(() => service.setSpeed(1.5)).called(1);
+        statuses.add(status);
+        await pumpEventQueue();
+        bloc.add(
+          PlayerTopicSelected(
+            position: const Duration(seconds: 65),
+            audioUri: local,
+          ),
+        );
+        await pumpEventQueue();
+        verifyInOrder([
+          service.pause,
+          () => service.open(local.toString()),
+          () => service.setSpeed(1.5),
+          () => service.seekTo(const Duration(seconds: 65)),
+          service.play,
+        ]);
+        expect(bloc.state.speed, PlaybackSpeed.x1_5);
+        // A second tap on the same analyzed source must not reload it.
+        bloc.add(
+          PlayerTopicSelected(
+            position: const Duration(seconds: 65),
+            audioUri: local,
+          ),
+        );
+        await pumpEventQueue();
+        verifyNever(() => service.open(local.toString()));
+        verify(() => service.seekTo(const Duration(seconds: 65))).called(1);
+        await bloc.close();
+      },
+    );
+  }
+
+  test('leaving during topic load cannot seek or restart playback', () async {
+    final local = Uri.file('/tmp/analyzed.mp3');
+    final loading = Completer<Duration?>();
+    final started = Completer<void>();
+    when(service.pause).thenAnswer((_) async {});
+    when(() => service.open(local.toString())).thenAnswer((_) {
+      started.complete();
+      return loading.future;
+    });
+    final bloc =
+        AudioPlayerBloc(
+          repository: AudioPlayerRepository(service: service),
+        )..add(
+          PlayerTopicSelected(
+            position: const Duration(seconds: 65),
+            audioUri: local,
+          ),
+        );
+    await started.future;
+    await bloc.close();
+    loading.complete(const Duration(minutes: 10));
+    await pumpEventQueue();
+    verifyNever(() => service.seekTo(const Duration(seconds: 65)));
+    verifyNever(service.play);
   });
 
   blocTest<AudioPlayerBloc, AudioPlayerState>(

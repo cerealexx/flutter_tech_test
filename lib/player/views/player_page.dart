@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:cabina/common/theme/app_theme.dart';
 import 'package:cabina/common/widgets/poster_image.dart';
 import 'package:cabina/common/widgets/status_views.dart';
+import 'package:cabina/episode_insights/cubit/episode_insights_cubit.dart';
+import 'package:cabina/episode_insights/data/episode_insights_repository.dart';
+import 'package:cabina/episode_insights/widgets/episode_insights_drawer.dart';
 import 'package:cabina/player/bloc/audio_player_bloc.dart';
 import 'package:cabina/player/data/audio_player_repository.dart';
 import 'package:cabina/player/data/services/just_audio_player_service.dart';
@@ -21,36 +26,85 @@ class PlayerPage extends StatefulWidget {
   static const routePath = '/player';
 
   static GoRoute route() => GoRoute(
-        path: routePath,
-        name: routeName,
-        builder: (context, state) {
-          final args = state.extra! as PlayerArgs;
-          return BlocProvider(
+    path: routePath,
+    name: routeName,
+    builder: (context, state) {
+      final args = state.extra! as PlayerArgs;
+      return MultiBlocProvider(
+        providers: [
+          BlocProvider(
             create: (_) => AudioPlayerBloc(
-              repository:
-                  AudioPlayerRepository(service: JustAudioPlayerService()),
+              repository: AudioPlayerRepository(
+                service: JustAudioPlayerService(),
+              ),
             ),
-            child: PlayerPage(args: args),
-          );
-        },
+          ),
+          BlocProvider(
+            create: (context) => EpisodeInsightsCubit(
+              repository: context.read<EpisodeInsightsRepository>(),
+              episode: args.episode,
+            ),
+          ),
+        ],
+        child: PlayerPage(args: args),
       );
+    },
+  );
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
 class _PlayerPageState extends State<PlayerPage> {
+  late final EpisodeInsightsCubit _insights;
+  final _scaffold = GlobalKey<ScaffoldState>();
+
   @override
   void initState() {
     super.initState();
-    context.read<AudioPlayerBloc>().add(PlayerOpened(widget.args));
+    _insights = context.read<EpisodeInsightsCubit>();
+    unawaited(_insights.generate());
+    final repository = context.read<EpisodeInsightsRepository>();
+    unawaited(_openPlayer(repository));
+  }
+
+  Future<void> _openPlayer(EpisodeInsightsRepository repository) async {
+    final player = context.read<AudioPlayerBloc>();
+    final source = await repository.cachedAudioUri(widget.args.episode);
+    if (!mounted) return;
+    player.add(PlayerOpened(widget.args, sourceUri: source));
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = context.appTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Now Playing')),
+      key: _scaffold,
+      appBar: AppBar(
+        title: const Text('Now Playing'),
+        actions: [
+          BlocBuilder<EpisodeInsightsCubit, EpisodeInsightsState>(
+            builder: (context, state) => IconButton(
+              tooltip: 'Episode summary',
+              icon: Badge(
+                isLabelVisible: state.isBusy,
+                child: const Icon(Icons.summarize_outlined),
+              ),
+              onPressed: () => _scaffold.currentState?.openEndDrawer(),
+            ),
+          ),
+        ],
+      ),
+      endDrawer: EpisodeInsightsDrawer(
+        title: widget.args.episode.title,
+        cubit: _insights,
+        onTopic: (topic, audioUri) {
+          _scaffold.currentState?.closeEndDrawer();
+          context.read<AudioPlayerBloc>().add(
+            PlayerTopicSelected(position: topic.start, audioUri: audioUri),
+          );
+        },
+      ),
       body: BlocBuilder<AudioPlayerBloc, AudioPlayerState>(
         builder: (context, state) {
           if (state.status == PlayerStatus.error) {
@@ -70,8 +124,11 @@ class _PlayerPageState extends State<PlayerPage> {
                             color: theme.surface,
                             borderRadius: BorderRadius.circular(20),
                           ),
-                          child: Icon(Icons.podcasts,
-                              size: 64, color: theme.foregroundSoft),
+                          child: Icon(
+                            Icons.podcasts,
+                            size: 64,
+                            color: theme.foregroundSoft,
+                          ),
                         )
                       : PosterImage(url: args.artworkUrl!, borderRadius: 20),
                 ),
@@ -88,8 +145,9 @@ class _PlayerPageState extends State<PlayerPage> {
                 const SizedBox(height: 6),
                 Text(
                   args.podcastTitle,
-                  style: AppTextStyles.caption
-                      .copyWith(color: theme.foregroundSoft),
+                  style: AppTextStyles.caption.copyWith(
+                    color: theme.foregroundSoft,
+                  ),
                 ),
                 const Spacer(),
                 SeekBar(position: state.position),

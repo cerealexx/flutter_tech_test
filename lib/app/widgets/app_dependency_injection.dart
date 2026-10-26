@@ -1,8 +1,16 @@
+import 'package:cabina/common/env/env.dart';
 import 'package:cabina/common/network/api_client.dart';
 import 'package:cabina/common/services/itunes_search_service.dart';
 import 'package:cabina/discover/cubit/discover_cubit.dart';
 import 'package:cabina/discover/data/discover_repository.dart';
 import 'package:cabina/discover/data/favourites_repository.dart';
+import 'package:cabina/episode_insights/data/episode_insights_repository.dart';
+import 'package:cabina/episode_insights/data/services/audio_chunk_service.dart';
+import 'package:cabina/episode_insights/data/services/audio_download_service.dart';
+import 'package:cabina/episode_insights/data/services/episode_insights_service.dart';
+import 'package:cabina/episode_insights/data/services/i_episode_insights_service.dart';
+import 'package:cabina/episode_insights/data/services/insights_cache_service.dart';
+import 'package:cabina/episode_insights/data/services/openai_insights_service.dart';
 import 'package:cabina/library/cubit/library_cubit.dart';
 import 'package:cabina/library/data/library_repository.dart';
 import 'package:cabina/library/data/services/i_library_service.dart';
@@ -33,6 +41,27 @@ class AppDependencyInjection extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiRepositoryProvider(
       providers: [
+        RepositoryProvider<IEpisodeInsightsService>(
+          create: (_) {
+            final openAi = OpenAiInsightsService(
+              apiKey: Env.llmApiKey,
+              model: Env.summaryModel,
+            );
+            return EpisodeInsightsService(
+              configured: Env.llmApiKey.trim().isNotEmpty,
+              cache: InsightsCacheService(),
+              downloader: AudioDownloadService(),
+              chunks: const NativeAudioChunkService(),
+              transcriber: openAi,
+              summarizer: openAi,
+            );
+          },
+        ),
+        RepositoryProvider(
+          create: (ctx) => EpisodeInsightsRepository(
+            service: ctx.read<IEpisodeInsightsService>(),
+          ),
+        ),
         RepositoryProvider(
           create: (ctx) => ItunesSearchService(apiClient: apiClient),
         ),

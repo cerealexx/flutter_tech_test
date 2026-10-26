@@ -8,12 +8,21 @@ sealed class AudioPlayerEvent extends Equatable {
 }
 
 class PlayerOpened extends AudioPlayerEvent {
-  const PlayerOpened(this.args);
+  const PlayerOpened(this.args, {this.sourceUri});
 
   final PlayerArgs args;
+  final Uri? sourceUri;
 
   @override
-  List<Object?> get props => [args];
+  List<Object?> get props => [args, sourceUri];
+}
+
+class PlayerTopicSelected extends AudioPlayerEvent {
+  const PlayerTopicSelected({required this.position, required this.audioUri});
+  final Duration position;
+  final Uri audioUri;
+  @override
+  List<Object?> get props => [position, audioUri];
 }
 
 class PlayerPlayPauseToggled extends AudioPlayerEvent {

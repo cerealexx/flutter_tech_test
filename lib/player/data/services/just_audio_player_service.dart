@@ -6,18 +6,18 @@ import 'package:just_audio/just_audio.dart';
 
 class JustAudioPlayerService implements IPlayerService {
   JustAudioPlayerService({AudioPlayer? player})
-      : _player = player ?? AudioPlayer();
+    : _player = player ?? AudioPlayer();
 
   final AudioPlayer _player;
 
   @override
   Stream<PlayerPosition> get positionStream => _player.positionStream.map(
-        (position) => PlayerPosition(
-          position: position,
-          buffered: _player.bufferedPosition,
-          total: _player.duration,
-        ),
-      );
+    (position) => PlayerPosition(
+      position: position,
+      buffered: _player.bufferedPosition,
+      total: _player.duration,
+    ),
+  );
 
   @override
   Stream<PlayerStatus> get statusStream =>
@@ -39,28 +39,36 @@ class JustAudioPlayerService implements IPlayerService {
   }
 
   @override
-  Future<Duration?> open(String url) async {
+  Future<Duration?> open(String url) => _perform(
+    () => _player.setAudioSource(AudioSource.uri(Uri.parse(url))),
+    'Could not load audio',
+  );
+
+  @override
+  Future<void> play() => _perform(_player.play, 'Could not play audio');
+
+  @override
+  Future<void> pause() => _perform(_player.pause, 'Could not pause audio');
+
+  @override
+  Future<void> seekTo(Duration position) =>
+      _perform(() => _player.seek(position), 'Could not seek audio');
+
+  @override
+  Future<void> setSpeed(double speed) => _perform(
+    () => _player.setSpeed(speed),
+    'Could not change playback speed',
+  );
+
+  @override
+  Future<void> dispose() =>
+      _perform(_player.dispose, 'Could not release audio');
+
+  Future<T> _perform<T>(Future<T> Function() operation, String message) async {
     try {
-      return await _player.setUrl(url);
-    } on PlayerException catch (e) {
-      throw CabinaPlayerException('Could not load audio', cause: e);
-    } catch (e) {
-      throw CabinaPlayerException('Unexpected player error', cause: e);
+      return await operation();
+    } on Exception catch (error) {
+      throw CabinaPlayerException(message, cause: error);
     }
   }
-
-  @override
-  Future<void> play() => _player.play();
-
-  @override
-  Future<void> pause() => _player.pause();
-
-  @override
-  Future<void> seekTo(Duration position) => _player.seek(position);
-
-  @override
-  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
-
-  @override
-  Future<void> dispose() => _player.dispose();
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:bloc/bloc.dart';
+import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:cabina/common/errors/exceptions.dart';
 import 'package:cabina/player/data/audio_player_repository.dart';
 import 'package:cabina/player/models/playback_speed.dart';
@@ -19,6 +20,10 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
     on<PlayerOpened>(_whileActive(_onOpened));
     on<PlayerPlayPauseToggled>(_whileActive(_onPlayPauseToggled));
     on<PlayerSeeked>(_whileActive(_onSeeked));
+    on<PlayerTopicSelected>(
+      _whileActive(_onTopicSelected),
+      transformer: sequential(),
+    );
     on<PlayerSpeedChanged>(_whileActive(_onSpeedChanged));
     on<PlayerPositionUpdated>(_onPositionUpdated);
     on<PlayerStatusUpdated>(_onStatusUpdated);
@@ -37,6 +42,11 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
   late final StreamSubscription<PlayerStatus> _statusSub;
 
   bool _isClosing = false;
+  // Releases the sequential topic handler when the user leaves during a load.
+  final _closingSignal = Completer<void>();
+  Uri? _sourceUri;
+  // An older opening must not overwrite a more recent topic selection.
+  int _sourceRevision = 0;
 
   void _addIfActive(AudioPlayerEvent event) {
     if (!_isClosing) add(event);
@@ -47,8 +57,11 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
   ) => (event, emit) async {
     if (_isClosing) return;
     try {
-      await handler(event, emit);
-    } catch (_) {
+      await Future.any<void>([
+        Future<void>.sync(() => handler(event, emit)),
+        _closingSignal.future,
+      ]);
+    } on Exception {
       if (!_isClosing) rethrow;
     }
   };
@@ -58,17 +71,20 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
     Emitter<AudioPlayerState> emit,
   ) async {
     emit(state.copyWith(status: PlayerStatus.loading, args: event.args));
+    final revision = ++_sourceRevision;
+    final source = event.sourceUri ?? Uri.parse(event.args.episode.audioUrl);
     try {
-      final total = await _repository.open(event.args.episode.audioUrl);
-      if (_isClosing || emit.isDone) return;
+      final total = await _repository.open(source.toString());
+      if (_isClosing || revision != _sourceRevision) return;
+      _sourceUri = source;
       emit(
         state.copyWith(
           position: PlayerPosition(total: total ?? event.args.episode.duration),
         ),
       );
       await _repository.play();
-    } on CabinaException catch (e) {
-      if (_isClosing || emit.isDone) return;
+    } on CabinaPlayerException catch (e) {
+      if (_isClosing || revision != _sourceRevision) return;
       emit(
         state.copyWith(
           status: PlayerStatus.error,
@@ -96,12 +112,54 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
     await _repository.seekTo(event.position);
   }
 
+  Future<void> _onTopicSelected(
+    PlayerTopicSelected event,
+    Emitter<AudioPlayerState> emit,
+  ) async {
+    ++_sourceRevision;
+    try {
+      if (_sourceUri != event.audioUri) {
+        // Pause before replacing the source so it cannot briefly play at zero.
+        await _repository.pause();
+        if (_isClosing) return;
+        final total = await _repository.open(event.audioUri.toString());
+        if (_isClosing) return;
+        _sourceUri = event.audioUri;
+        emit(state.copyWith(position: PlayerPosition(total: total)));
+        await _repository.setSpeed(state.speed.value);
+      }
+
+      if (_isClosing) return;
+      final total = state.position.total;
+      if (total != null && event.position >= total) return;
+      await _repository.seekTo(event.position);
+      if (_isClosing) return;
+
+      // just_audio's play future lasts until playback finishes. Do not block
+      // subsequent topic taps behind that future.
+      unawaited(
+        _repository.play().onError<CabinaPlayerException>((_, _) {
+          _addIfActive(const PlayerStatusUpdated(PlayerStatus.error));
+        }),
+      );
+    } on CabinaPlayerException {
+      if (!_isClosing) {
+        emit(
+          state.copyWith(
+            status: PlayerStatus.error,
+            errorMessage: 'Could not play the selected topic',
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _onSpeedChanged(
     PlayerSpeedChanged event,
     Emitter<AudioPlayerState> emit,
   ) async {
     await _repository.setSpeed(event.speed.value);
-    if (_isClosing || emit.isDone) return;
+    if (_isClosing) return;
     emit(state.copyWith(speed: event.speed));
   }
 
@@ -133,6 +191,7 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
   @override
   Future<void> close() {
     _isClosing = true;
+    if (!_closingSignal.isCompleted) _closingSignal.complete();
 
     return Future.wait<void>([
       _positionSub.cancel(),
