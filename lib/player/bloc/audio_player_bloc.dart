@@ -19,7 +19,7 @@ class AudioPlayerBloc extends Bloc<AudioPlayerEvent, AudioPlayerState> {
       super(const AudioPlayerState()) {
     on<PlayerOpened>(_whileActive(_onOpened));
     on<PlayerPlayPauseToggled>(_whileActive(_onPlayPauseToggled));
-    on<PlayerSeeked>(_whileActive(_onSeeked));
+    on<PlayerSeeked>(_whileActive(_onSeeked), transformer: sequential());
     on<PlayerTopicSelected>(
       _whileActive(_onTopicSelected),
       transformer: sequential(),

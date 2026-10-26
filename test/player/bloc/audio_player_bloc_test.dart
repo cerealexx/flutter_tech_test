@@ -46,6 +46,39 @@ void main() {
     await statuses.close();
   });
 
+  for (final status in [PlayerStatus.playing, PlayerStatus.paused]) {
+    test(
+      'rapid seeks from $status wait for the preceding native seek',
+      () async {
+        final bloc = AudioPlayerBloc(
+          repository: AudioPlayerRepository(service: service),
+        );
+        addTearDown(bloc.close);
+        final firstSeek = Completer<void>();
+        const first = Duration(minutes: 5);
+        const last = Duration(minutes: 15);
+        when(() => service.seekTo(first)).thenAnswer((_) => firstSeek.future);
+        when(() => service.seekTo(last)).thenAnswer((_) async {});
+        statuses.add(status);
+        await pumpEventQueue();
+
+        bloc
+          ..add(const PlayerSeeked(first))
+          ..add(const PlayerSeeked(last));
+        await pumpEventQueue();
+        verify(() => service.seekTo(first)).called(1);
+        verifyNever(() => service.seekTo(last));
+
+        firstSeek.complete();
+        await pumpEventQueue();
+        verify(() => service.seekTo(last)).called(1);
+        expect(bloc.state.status, status);
+        verifyNever(service.play);
+        verifyNever(service.pause);
+      },
+    );
+  }
+
   group('completed playback', () {
     late AudioPlayerBloc bloc;
     const total = Duration(minutes: 20);

@@ -5,18 +5,26 @@ import 'package:cabina/player/models/player_position.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-class SeekBar extends StatelessWidget {
+class SeekBar extends StatefulWidget {
   const SeekBar({required this.position, super.key});
 
   final PlayerPosition position;
 
   @override
+  State<SeekBar> createState() => _SeekBarState();
+}
+
+class _SeekBarState extends State<SeekBar> {
+  double? _dragValue;
+
+  @override
   Widget build(BuildContext context) {
     final theme = context.appTheme;
-    final total = position.total ?? Duration.zero;
+    final total = widget.position.total ?? Duration.zero;
     final maxMs = total.inMilliseconds.toDouble();
     final valueMs =
-        position.position.inMilliseconds.toDouble().clamp(0.0, maxMs);
+        (_dragValue ?? widget.position.position.inMilliseconds.toDouble())
+            .clamp(0.0, maxMs);
 
     return Column(
       children: [
@@ -24,18 +32,27 @@ class SeekBar extends StatelessWidget {
           value: maxMs == 0 ? 0 : valueMs,
           max: maxMs == 0 ? 1 : maxMs,
           activeColor: theme.primary,
-          onChanged: (value) {
-            context
-                .read<AudioPlayerBloc>()
-                .add(PlayerSeeked(Duration(milliseconds: value.round())));
-          },
+          onChanged: maxMs == 0
+              ? null
+              : (value) => setState(() => _dragValue = value),
+          onChangeEnd: maxMs == 0
+              ? null
+              : (value) {
+                  context.read<AudioPlayerBloc>().add(
+                    PlayerSeeked(Duration(milliseconds: value.round())),
+                  );
+                  setState(() => _dragValue = null);
+                },
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(position.position.clock, style: AppTextStyles.caption),
+              Text(
+                Duration(milliseconds: valueMs.round()).clock,
+                style: AppTextStyles.caption,
+              ),
               Text(total.clock, style: AppTextStyles.caption),
             ],
           ),
